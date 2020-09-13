@@ -42,7 +42,7 @@ source("ensemble_method/utils_ensemble.R")
 
 ### Define necessary parameters
 ## Monte Carlo Simulation
-n_simulations = 50                  # Number of simulation rounds for Monte Carlo Study
+n_simulations = 10                  # Number of simulation rounds for Monte Carlo Study
 
 ## Data
 n_covariates = 5                    # Number of confounders
@@ -51,10 +51,22 @@ effect = 0.5                        # True value for effect
 beta = seq(1, n_covariates, 1)/10   # Coefficients for confounders in DGP
 
 ## Ensemble method
-cv_folds = 5                        # Number of folds for cross-validation of used ML methods in the ensemble method
+cv_folds = 2                        # Number of folds for cross-validation of used ML methods in the ensemble method
 
 ## Double ML estimator
 k_folds = 2                         # cross-fitting folds for DML estimation
+
+
+# Setup ensemble ----------------------------------------------------------
+# Components of ensemble for the p-score
+ols_ps = create_method("ols",name="OLS high")
+lasso_bin_ps = create_method("lasso",name="Lasso high",args=list(family = "binomial"))
+forest_ps =  create_method("forest_grf",name="Forest",args=list(tune.parameters = "all",honesty=FALSE))
+
+# Components of ensemble for the outcome
+ols_oc = create_method("ols",name="OLS high")
+lasso_oc = create_method("lasso",name="Lasso high",args=list(family = "binomial"))
+forest_oc =  create_method("forest_grf",name="Forest",args=list(tune.parameters = "all",honesty=FALSE))
 
 
 # Simulation 1: Linear Case -----------------------------------------------
@@ -97,30 +109,30 @@ for (j in 1:n_simulations) {
     
     ## Ensemble for the outcome
     # estimate the conditional expectation of E[Y|X] aka the conditional outcome function
-    G_ensemble_aux = regression_forest(X = X_aux, Y = Y_aux)
-    G_main = as.matrix(predict(g_model_aux, newdata = as.matrix(X_fold)))
+    G_ensemble_aux = ensemble(list(ols_oc, lasso_oc, forest_oc), X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux)
+    G_aux = G_ensemble_aux$fit_full$predictions
     
-    G_ensemble_main = regression_forest(X = X_fold, Y = Y_fold)
-    G_aux = as.matrix(predict(g_model_fold, newdata = X_aux))
+    G_ensemble_main = ensemble(list(ols_oc, lasso_oc, forest_oc), X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main)
+    G_main = G_ensemble_main$fit_full$predictions
     
     ## Ensemble for the p-score
     # estimate the conditional expectation of E[D|X] aka the propensity score function
-    M_ensemble_aux = regression_forest(X = X_aux, Y = D_aux)
-    M_main = as.matrix(predict(m_model_aux, newdata = X_fold))
+    M_ensemble_aux = ensemble(list(ols_ps, lasso_bin_ps, forest_ps), X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux)
+    M_aux = M_ensemble_aux$fit_full$predictions
     
-    M_ensemble_main = regression_forest(X = X_fold, Y = D_fold)
-    M_aux = as.matrix(predict(m_model_fold, newdata = X_aux))
+    M_ensemble_main = ensemble(list(ols_ps, lasso_bin_ps, forest_ps), X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main)
+    M_main = M_ensemble_main$fit_full$predictions
     
     ### Step 2 DML: Derive the true effect (theta) by applying Neyman orthogonality theorem
     
     ## Calculate the residuals from the nuisance predictions, which are necessary for the orthogonality conditions
-    V_aux = D_aux - m_aux
-    V_fold = D_fold - m_fold
+    V_aux = D_aux - M_aux
+    V_main = D_main - M_main
     
     # regress the residuals to get orthogonal scores
     theta_aux = dml_est(Y_aux, G_aux, V_aux)        # with models trained on fold
-    theta_fold = dml_est(Y_main, G_main, V_main)    # with models trained on aux
-    theta_vec[i] = mean(theta_aux, theta_fold)
+    theta_main = dml_est(Y_main, G_main, V_main)    # with models trained on aux
+    theta_vec[i] = mean(theta_aux, theta_main)
     
   }
   
