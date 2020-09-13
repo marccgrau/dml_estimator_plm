@@ -46,15 +46,7 @@ source("DGP1.R")
 
 #### This parameters and data should be coming from the main file
 
-# define necessary parameters
-k_folds = 2
-n_covariates = 5
-n_simulations = 50
-n_observations = 2000
 
-# true parameters of linear model
-effect = 0.5
-beta = seq(1, n_covariates, 1)/10
 
 
 #########################################
@@ -110,8 +102,8 @@ for (j in 1:n_simulations) {
     V_fold = D_fold - m_fold
 
     # regress the residuals to get orthogonal scores
-    theta_aux = mean(V_aux * (Y_aux - g_aux)) / mean(V_aux * V_aux)        # with models trained on fold
-    theta_fold = mean(V_fold * (Y_fold - g_fold)) / mean(V_fold * V_fold)    # with models trained on aux
+    theta_aux = dml_est(Y_aux, G_aux, V_aux)        # with models trained on fold
+    theta_fold = dml_est(Y_main, G_main, V_main)    # with models trained on aux
     theta_vec[i] = mean(theta_aux, theta_fold)
     
   }
