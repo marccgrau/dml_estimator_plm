@@ -1,3 +1,4 @@
+# Averaging method (comparison purposes) ----------------------------------
 
 mean_fit = function(x,y) {
   mean = mean(y)
@@ -26,6 +27,9 @@ ols_fit = function(x,y) {
   ols_coef
 }
 
+
+# Least squares regression ------------------------------------------------
+
 predict.ols_fit = function(ols_fit,x,y,xnew=NULL,weights=FALSE) {
   
   if (is.null(xnew)) xnew = x
@@ -46,6 +50,8 @@ predict.ols_fit = function(ols_fit,x,y,xnew=NULL,weights=FALSE) {
   list("prediction"=fit,"weights"=hat_mat)
 }
 
+
+# Cross-validated ridge regression ----------------------------------------
 
 #' This function estimates cross-validated ridge regression based on the \code{\link{glmnet}} package
 #'
@@ -90,7 +96,9 @@ predict.ridge_fit = function(ridge_fit,x,y,xnew=NULL,weights=FALSE) {
 }
 
 
-#' This function estimates cross-validated ridge regression based on the \code{\link{glmnet}} package
+# Cross-validated LASSO regression ----------------------------------------
+
+#' This function estimates cross-validated lasso regression based on the \code{\link{glmnet}} package
 #'
 #' @param x Matrix of covariates (number of observations times number of covariates matrix)
 #' @param y vector of outcomes
@@ -117,8 +125,7 @@ predict.lasso_fit = function(lasso_fit,x,y,xnew=NULL,weights=FALSE) {
   list("prediction"=fit,"weights"="No weighted representation of Lasso available.")
 }
 
-
-
+# Random Forest -----------------------------------------------------------
 
 forest_grf_fit = function(x,y,args=list()) {
 
@@ -140,6 +147,8 @@ predict.forest_grf_fit = function(forest_grf_fit,x,y,xnew=NULL,weights=FALSE) {
   list("prediction"=fit,"weights"=w)
 }
 
+
+# Post-LASSO regression ---------------------------------------------------
 
 plasso_fit = function(x,y,args=list()) {
   plasso = do.call(plasso,c(list(x=x,y=y),args))
@@ -171,3 +180,28 @@ predict.plasso_fit = function(plasso_fit,x,y,xnew=NULL,weights=FALSE) {
   list("prediction"=fit_plasso,"weights"=hat_mat)
 }
   
+
+
+# XGBoost (eXtreme Gradient Boosting) -------------------------------------
+
+xgb_fit = function(x,y,args=list()) {
+  
+  xgb = do.call(xgboost, c(list(data = x, label = y),args))
+  
+  xgb
+}
+
+
+predict.xgb_fit = function(xgb_fit,x,y,xnew=NULL,weights=FALSE) {
+  
+  if (is.null(xnew)) xnew = x
+  
+  fit = predict(xgb_fit,newdata=xnew)
+
+  list("prediction"=fit, "weights" = "No weighted representation of XGBoost available")
+}
+
+
+# Neural Network ----------------------------------------------------------
+
+

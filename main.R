@@ -14,7 +14,7 @@
 
 ## Load necessary packages, set working directory and seed, remove previously stored variables
 
-toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats")
+toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats", "xgboost")
 toinstall <- toload[which(toload %in% installed.packages()[,1] == F)]
 lapply(toinstall, install.packages, character.only = TRUE)
 lapply(toload, require, character.only = TRUE)
@@ -62,11 +62,14 @@ k_folds = 2                         # cross-fitting folds for DML estimation
 mean_ps = create_method("mean",name="Mean ps")
 lasso_bin_ps = create_method("lasso",name="Lasso ps",args=list(family = "binomial"))
 forest_ps =  create_method("forest_grf",name="Forest ps",args=list(tune.parameters = "all",honesty=FALSE))
+xgb_ps = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 100, booster = "gbtree", verbose = F))
+
 
 # Components of ensemble for the outcome
 ols_oc = create_method("ols",name="OLS oc")
 lasso_oc = create_method("lasso",name="Lasso oc",args=list(family = "binomial"))
 forest_oc =  create_method("forest_grf",name="Forest oc",args=list(tune.parameters = "all",honesty=FALSE))
+xgb_oc = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 100, booster = "gbtree", verbose = F))
 
 ps_methods = list(mean_ps, forest_ps)
 oc_methods = list(ols_oc, forest_oc)
@@ -157,7 +160,25 @@ for (j in 1:n_simulations) {
   
 }
 
+# Averaging over all simulations
+# Average treatment effect
 est_effect = mean(theta)                            # average effect over all simulation rounds
-print(est_effect)
+
+# Ensemble weights of E[Y|X]
+oc_ensemble_weights = as.data.frame(t(colMeans(oc_ensemble)))
+for (i in 1:length(oc_methods)) {
+  if (!is.null(oc_methods[[i]]$name)) colnames(oc_ensemble_weights)[i] = oc_methods[[i]]$name
+}
+
+# Ensemble weights of E[D|X]
+ps_ensemble_weights = as.data.frame(t(colMeans(ps_ensemble)))
+for (i in 1:length(ps_methods)) {
+  if (!is.null(ps_methods[[i]]$name)) colnames(ps_ensemble_weights)[i] = ps_methods[[i]]$name
+}
+
+# Print the results
+paste("Average treatment effect:", round(est_effect, 3))
+paste(sprintf("Ensemble weight E[Y|X] Method%s:",seq(1:length(oc_ensemble_weights))), round(oc_ensemble_weights, 3))
+paste(sprintf("Ensemble weight E[D|X] Method%s:",seq(1:length(ps_ensemble_weights))), round(ps_ensemble_weights, 3))
 
 
