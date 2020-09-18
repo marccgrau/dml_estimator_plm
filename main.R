@@ -42,7 +42,7 @@ source("ensemble_method/utils_ensemble.R")
 
 ### Define necessary parameters
 ## Monte Carlo Simulation
-n_simulations = 10                  # Number of simulation rounds for Monte Carlo Study
+n_simulations = 5                   # Number of simulation rounds for Monte Carlo Study
 
 ## Data
 n_covariates = 5                    # Number of confounders
@@ -59,31 +59,37 @@ k_folds = 2                         # cross-fitting folds for DML estimation
 
 # Setup ensemble ----------------------------------------------------------
 # Components of ensemble for the p-score
-ols_ps = create_method("ols",name="OLS high")
-lasso_bin_ps = create_method("lasso",name="Lasso high",args=list(family = "binomial"))
-forest_ps =  create_method("forest_grf",name="Forest",args=list(tune.parameters = "all",honesty=FALSE))
+mean_ps = create_method("mean",name="Mean ps")
+lasso_bin_ps = create_method("lasso",name="Lasso ps",args=list(family = "binomial"))
+forest_ps =  create_method("forest_grf",name="Forest ps",args=list(tune.parameters = "all",honesty=FALSE))
 
 # Components of ensemble for the outcome
-ols_oc = create_method("ols",name="OLS high")
-lasso_oc = create_method("lasso",name="Lasso high",args=list(family = "binomial"))
-forest_oc =  create_method("forest_grf",name="Forest",args=list(tune.parameters = "all",honesty=FALSE))
+ols_oc = create_method("ols",name="OLS oc")
+lasso_oc = create_method("lasso",name="Lasso oc",args=list(family = "binomial"))
+forest_oc =  create_method("forest_grf",name="Forest oc",args=list(tune.parameters = "all",honesty=FALSE))
 
+ps_methods = list(mean_ps, forest_ps)
+oc_methods = list(ols_oc, forest_oc)
 
 # Simulation 1: Linear Case -----------------------------------------------
 
 # create folds for cross-fitting
 
-theta_vec = rep(NA, k_folds)
-theta_test = rep(NA, k_folds)
+theta_cf = rep(NA, k_folds)
 theta = rep(NA, n_simulations)
+
+oc_ensemble_cf = matrix(NA, k_folds, length(oc_methods))
+ps_ensemble_cf = matrix(NA, k_folds, length(ps_methods)) 
+oc_ensemble = matrix(NA, n_simulations, length(oc_methods))
+ps_ensemble = matrix(NA, n_simulations, length(ps_methods)) 
 
 for (j in 1:n_simulations) {
   
   # simulate data
   data = DGP1(n_simulations = n_simulations,n_covariates = n_covariates, n_observations = n_observations, beta = beta, effect = effect)
-  Y = as.data.frame(data[[1]])
-  D = as.data.frame(data[[2]])
-  X = as.data.frame(data[[3]])
+  Y = data[[1]]
+  D = data[[2]]
+  X = data[[3]]
   n_obs = seq(1, nrow(X), 1)
   
   # construct folds
@@ -92,16 +98,16 @@ for (j in 1:n_simulations) {
   # cross-fitting folds
   for (i in 1:k_folds) {
     # split the data set into main and auxiliary 
-    fold = as.logical(fold_mat[,i])
+    folds = as.logical(fold_mat[,i])
     
-    X_main <- X[!fold, ]
-    X_aux <- X[fold, ]
+    X_main <- X[!folds, ]
+    X_aux <- X[folds, ]
     
-    Y_main <- Y[!fold, ]
-    Y_aux <- Y[fold, ]
+    Y_main <- Y[!folds]
+    Y_aux <- Y[folds]
     
-    D_main <- D[!fold, ]
-    D_aux <- D[fold, ]
+    D_main <- D[!folds]
+    D_aux <- D[folds]
     
     ### Step 1 DML: Estimate nuisance parameters
     # The ensemble needs to be trained on one partition of the data set. Then the predictions are made using the other partition
@@ -109,19 +115,27 @@ for (j in 1:n_simulations) {
     
     ## Ensemble for the outcome
     # estimate the conditional expectation of E[Y|X] aka the conditional outcome function
-    G_ensemble_aux = ensemble(list(ols_oc, lasso_oc, forest_oc), X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux)
-    G_aux = G_ensemble_aux$fit_full$predictions
+    G_ensemble_aux = ensemble(oc_methods, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
+    G_aux = G_ensemble_aux$fit_full$predictions # extract predictions applying the ensemble weights
+    oc_ensemble_aux = G_ensemble_aux$nnls_weights # extract the ensemble weights
     
-    G_ensemble_main = ensemble(list(ols_oc, lasso_oc, forest_oc), X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main)
-    G_main = G_ensemble_main$fit_full$predictions
+    G_ensemble_main = ensemble(oc_methods, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
+    G_main = G_ensemble_main$fit_full$predictions # extract predictions applying the ensemble weights
+    oc_ensemble_main = G_ensemble_main$nnls_weights # extract the ensemble weights
+    
+    oc_ensemble_cf[i, ] = colMeans(rbind(oc_ensemble_aux, oc_ensemble_main)) # store the cross-fitted average of this iteration
     
     ## Ensemble for the p-score
     # estimate the conditional expectation of E[D|X] aka the propensity score function
-    M_ensemble_aux = ensemble(list(ols_ps, lasso_bin_ps, forest_ps), X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux)
-    M_aux = M_ensemble_aux$fit_full$predictions
+    M_ensemble_aux = ensemble(ps_methods, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
+    M_aux = M_ensemble_aux$fit_full$predictions # extract predictions applying the ensemble weights
+    ps_ensemble_aux = M_ensemble_aux$nnls_weights # extract the ensemble weights
     
-    M_ensemble_main = ensemble(list(ols_ps, lasso_bin_ps, forest_ps), X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main)
-    M_main = M_ensemble_main$fit_full$predictions
+    M_ensemble_main = ensemble(ps_methods, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
+    M_main = M_ensemble_main$fit_full$predictions # extract predictions applying the ensemble weights
+    ps_ensemble_main = M_ensemble_main$nnls_weights # extract the ensemble weights
+    
+    ps_ensemble_cf[i, ] = colMeans(rbind(ps_ensemble_aux, ps_ensemble_main)) # store the cross-fitted average of this iteration
     
     ### Step 2 DML: Derive the true effect (theta) by applying Neyman orthogonality theorem
     
@@ -132,14 +146,18 @@ for (j in 1:n_simulations) {
     # regress the residuals to get orthogonal scores
     theta_aux = dml_est(Y_aux, G_aux, V_aux)        # with models trained on fold
     theta_main = dml_est(Y_main, G_main, V_main)    # with models trained on aux
-    theta_vec[i] = mean(theta_aux, theta_main)
+    theta_cf[i] = mean(theta_aux, theta_main)
     
   }
   
-  theta[j] = mean(theta_vec)
+  # update list of estimates for current simulation round
+  theta[j] = mean(theta_cf)                         # estimated effect theta in current simulation round
+  oc_ensemble[j,] = colMeans(oc_ensemble_cf)        # weights for the ml methods in the ensemble of the function E[Y|X]
+  ps_ensemble[j,] = colMeans(ps_ensemble_cf)        # weights for the ml methods in the ensemble of the function E[D|X]
+  
 }
 
-est_effect = mean(theta)
+est_effect = mean(theta)                            # average effect over all simulation rounds
 print(est_effect)
 
 

@@ -30,7 +30,7 @@ ensemble = function(ml,
     
     fit_cv[is.na(fit_cv)] = mean(y) # e.g. glmnet produces sometimes NaN for logistic Ridge
     mse_cv = colMeans((y - fit_cv)^2)
-    nnls_weights = nnls(fit_cv,y)$x
+    nnls_weights = nnls(fit_cv,as.matrix(y))$x
     nnls_weights = nnls_weights / sum(nnls_weights)
     
     fit_full = ensemble_core(ml,x,y,xnew,weights=weights,quiet=quiet)
