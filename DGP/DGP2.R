@@ -7,6 +7,14 @@
 #' @param n_covariates number of covariates
 #'
 
+g_func = function(X){
+  sin(X)^2
+}
+
+m_func = function(X, nu = 0, gamma = 1) {
+  0.5/pi*(sinh(gamma)) / (cosh(gamma) - cos(X - nu))
+}
+
 DGP1 = function(n_simulations, n_covariates, n_observations, beta, effect) {
   
   # construct the correlation matrix
@@ -24,8 +32,8 @@ DGP1 = function(n_simulations, n_covariates, n_observations, beta, effect) {
   eta = rnorm(n_observations, mean = 0, sd = 1)
   
   # construct nuisance functions
-  M = X %*% beta
-  G = X %*% beta^(-1)
+  M = m_func(X %*% beta)
+  G = g_func(X %*% beta)
   
   # construct treatments
   D = M + epsilon

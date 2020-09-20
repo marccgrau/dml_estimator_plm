@@ -33,9 +33,9 @@ ensemble = function(ml,
     nnls_weights = nnls(fit_cv,as.matrix(y))$x
     nnls_weights = nnls_weights / sum(nnls_weights)
     
-    fit_full = ensemble_core(ml,x,y,xnew,weights=weights,quiet=quiet)
-    best = fit_full$predictions[,which.min(mse_cv)]
-    ensemble = fit_full$predictions %*% nnls_weights
+    fit_full = ensemble_core(ml,x,y,xnew,quiet=quiet)
+    best = fit_full$predictions[,which.min(mse_cv)]         # predictions of the best performing ml method according to MSE
+    ensemble = fit_full$predictions %*% nnls_weights        # construct ensemble by multiplying predictions of each ml method with the respective weight
     
     w = NULL
     if (isTRUE(weights)) {

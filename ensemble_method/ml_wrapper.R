@@ -184,7 +184,7 @@ predict.plasso_fit = function(plasso_fit,x,y,xnew=NULL,weights=FALSE) {
 
 # XGBoost (eXtreme Gradient Boosting) -------------------------------------
 
-xgb_fit = function(x,y,args=list()) {
+xgboost_fit = function(x,y,args=list()) {
   
   xgb = do.call(xgboost, c(list(data = x, label = y),args))
   
@@ -192,7 +192,7 @@ xgb_fit = function(x,y,args=list()) {
 }
 
 
-predict.xgb_fit = function(xgb_fit,x,y,xnew=NULL,weights=FALSE) {
+predict.xgboost_fit = function(xgb_fit,x,y,xnew=NULL,weights=FALSE) {
   
   if (is.null(xnew)) xnew = x
   
@@ -204,4 +204,34 @@ predict.xgb_fit = function(xgb_fit,x,y,xnew=NULL,weights=FALSE) {
 
 # Neural Network ----------------------------------------------------------
 
+neural_net_fit = function(x,y,args=list()) {
+  
+  scale_x = as.data.frame(scale(x, center = TRUE, scale = TRUE))
+  scale_y = as.data.frame(scale(y, center = TRUE, scale = TRUE))
+  unscale_mean_y = mean(y)
+  unscale_sd_y = sd(y)
+  
+  colnames(scale_y) = c("Y1")
+  
+  tempdata = cbind(scale_y, scale_x)
+  
+  nn_formula = as.formula(paste("Y1 ~", paste(colnames(scale_x), collapse = " + ")))
+  
+  NNet = do.call(neuralnet, c(list(formula = nn_formula, data = tempdata), args))
+  
+  list("model" = NNet, "unscale_mean" = unscale_mean_y, "unscale_sd" = unscale_sd_y)
+}
 
+
+predict.neural_net_fit = function(neural_net_fit,x,y,xnew=NULL,weights=FALSE) {
+  
+  if (is.null(xnew)) xnew = x
+  
+  scale_xnew = as.data.frame(scale(xnew, center = TRUE, scale = TRUE))
+  
+  preds = predict(neural_net_fit$model,newdata = scale_xnew)
+  
+  fit = (preds + neural_net_fit$unscale_mean) * neural_net_fit$unscale_sd
+  
+  list("prediction"=fit, "weights" = "No weighted representation of the neural network available")
+}

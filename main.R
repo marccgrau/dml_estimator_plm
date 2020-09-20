@@ -14,7 +14,7 @@
 
 ## Load necessary packages, set working directory and seed, remove previously stored variables
 
-toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats", "xgboost")
+toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats", "xgboost", "neuralnet")
 toinstall <- toload[which(toload %in% installed.packages()[,1] == F)]
 lapply(toinstall, install.packages, character.only = TRUE)
 lapply(toload, require, character.only = TRUE)
@@ -57,24 +57,46 @@ cv_folds = 2                        # Number of folds for cross-validation of us
 k_folds = 2                         # cross-fitting folds for DML estimation
 
 
+
 # Setup ensemble ----------------------------------------------------------
 # Components of ensemble for the p-score
 mean_ps = create_method("mean",name="Mean ps")
+ols_ps = create_method("ols", name = "OLS ps")
 lasso_bin_ps = create_method("lasso",name="Lasso ps",args=list(family = "binomial"))
 forest_ps =  create_method("forest_grf",name="Forest ps",args=list(tune.parameters = "all",honesty=FALSE))
-xgb_ps = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 100, booster = "gbtree", verbose = F))
-
+xgb_ps = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
+neural_net_ps = create_method("neural_net", name = "NeuralNet ps", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
 
 # Components of ensemble for the outcome
 ols_oc = create_method("ols",name="OLS oc")
 lasso_oc = create_method("lasso",name="Lasso oc",args=list(family = "binomial"))
 forest_oc =  create_method("forest_grf",name="Forest oc",args=list(tune.parameters = "all",honesty=FALSE))
-xgb_oc = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 100, booster = "gbtree", verbose = F))
+xgb_oc = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
+neural_net_oc = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
 
-ps_methods = list(mean_ps, forest_ps)
-oc_methods = list(ols_oc, forest_oc)
+
+ps_methods = list(ols_ps, forest_ps, xgb_ps, neural_net_ps)
+oc_methods = list(ols_oc, forest_oc, xgb_ps, neural_net_oc)
 
 # Simulation 1: Linear Case -----------------------------------------------
+
+# Hyperparameter Tuning for DGP 1
+
+
+# Setup the ml methods used in the ensemble for the estimation of the nuisance parameters
+# ML methods used for propensity score estimation
+lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial"))
+xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
+nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
+
+# ML methods used for potential outcome estimation
+lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial"))
+xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
+nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
+
+# list the respective methods for each ensemble
+ps_methods_1 = list(ols_ps, forest_ps, xgb_ps, neural_net_ps)
+oc_methods_1 = list(ols_oc, forest_oc, xgb_ps, neural_net_oc)
 
 # create folds for cross-fitting
 
@@ -118,24 +140,24 @@ for (j in 1:n_simulations) {
     
     ## Ensemble for the outcome
     # estimate the conditional expectation of E[Y|X] aka the conditional outcome function
-    G_ensemble_aux = ensemble(oc_methods, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
-    G_aux = G_ensemble_aux$fit_full$predictions # extract predictions applying the ensemble weights
+    G_ensemble_aux = ensemble(oc_methods_1, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
+    G_aux = G_ensemble_aux$ensemble # extract predictions applying the ensemble weights
     oc_ensemble_aux = G_ensemble_aux$nnls_weights # extract the ensemble weights
     
-    G_ensemble_main = ensemble(oc_methods, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
-    G_main = G_ensemble_main$fit_full$predictions # extract predictions applying the ensemble weights
+    G_ensemble_main = ensemble(oc_methods_1, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
+    G_main = G_ensemble_main$ensemble # extract predictions applying the ensemble weights
     oc_ensemble_main = G_ensemble_main$nnls_weights # extract the ensemble weights
     
     oc_ensemble_cf[i, ] = colMeans(rbind(oc_ensemble_aux, oc_ensemble_main)) # store the cross-fitted average of this iteration
     
     ## Ensemble for the p-score
     # estimate the conditional expectation of E[D|X] aka the propensity score function
-    M_ensemble_aux = ensemble(ps_methods, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
-    M_aux = M_ensemble_aux$fit_full$predictions # extract predictions applying the ensemble weights
+    M_ensemble_aux = ensemble(ps_methods_1, X_main, Y_main, nfolds=cv_folds, quiet=F, xnew=X_aux) # estimate the model
+    M_aux = M_ensemble_aux$ensemble # extract predictions applying the ensemble weights
     ps_ensemble_aux = M_ensemble_aux$nnls_weights # extract the ensemble weights
     
-    M_ensemble_main = ensemble(ps_methods, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
-    M_main = M_ensemble_main$fit_full$predictions # extract predictions applying the ensemble weights
+    M_ensemble_main = ensemble(ps_methods_1, X_aux, Y_aux, nfolds=cv_folds, quiet=F, xnew=X_main) # estimate the model
+    M_main = M_ensemble_main$ensemble # extract predictions applying the ensemble weights
     ps_ensemble_main = M_ensemble_main$nnls_weights # extract the ensemble weights
     
     ps_ensemble_cf[i, ] = colMeans(rbind(ps_ensemble_aux, ps_ensemble_main)) # store the cross-fitted average of this iteration
@@ -147,8 +169,8 @@ for (j in 1:n_simulations) {
     V_main = D_main - M_main
     
     # regress the residuals to get orthogonal scores
-    theta_aux = dml_est(Y_aux, G_aux, V_aux)        # with models trained on fold
-    theta_main = dml_est(Y_main, G_main, V_main)    # with models trained on aux
+    theta_aux = dml_est(Y_aux, G_aux, V_aux)        # with models trained on main for G and M
+    theta_main = dml_est(Y_main, G_main, V_main)    # with models trained on aux for G and M
     theta_cf[i] = mean(theta_aux, theta_main)
     
   }
@@ -168,17 +190,22 @@ est_effect = mean(theta)                            # average effect over all si
 oc_ensemble_weights = as.data.frame(t(colMeans(oc_ensemble)))
 for (i in 1:length(oc_methods)) {
   if (!is.null(oc_methods[[i]]$name)) colnames(oc_ensemble_weights)[i] = oc_methods[[i]]$name
+  oc_ensemble = as.data.frame(oc_ensemble)
+  colnames(oc_ensemble)[i] = oc_methods[[i]]$name
 }
+
 
 # Ensemble weights of E[D|X]
 ps_ensemble_weights = as.data.frame(t(colMeans(ps_ensemble)))
 for (i in 1:length(ps_methods)) {
   if (!is.null(ps_methods[[i]]$name)) colnames(ps_ensemble_weights)[i] = ps_methods[[i]]$name
+  ps_ensemble = as.data.frame(ps_ensemble)
+  colnames(ps_ensemble)[i] = ps_methods[[i]]$name
 }
 
 # Print the results
 paste("Average treatment effect:", round(est_effect, 3))
-paste(sprintf("Ensemble weight E[Y|X] Method%s:",seq(1:length(oc_ensemble_weights))), round(oc_ensemble_weights, 3))
-paste(sprintf("Ensemble weight E[D|X] Method%s:",seq(1:length(ps_ensemble_weights))), round(ps_ensemble_weights, 3))
+paste(sprintf("Ensemble weight E[Y|X] %s:",colnames(oc_ensemble_weights)), round(oc_ensemble_weights, 3))
+paste(sprintf("Ensemble weight E[Y|X] %s:",colnames(ps_ensemble_weights)), round(ps_ensemble_weights, 3))
 
 
