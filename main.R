@@ -28,6 +28,7 @@ set.seed(123)
 ## Load source functions
 # DGPs
 source("DGP/DGP1.R")
+source("DGP/DGP2.R")
 
 # DML estimator
 source("nonparam_DML/DML_estimator.R")
@@ -57,46 +58,84 @@ cv_folds = 2                        # Number of folds for cross-validation of us
 k_folds = 2                         # cross-fitting folds for DML estimation
 
 
-
-# Setup ensemble ----------------------------------------------------------
-# Components of ensemble for the p-score
-mean_ps = create_method("mean",name="Mean ps")
-ols_ps = create_method("ols", name = "OLS ps")
-lasso_bin_ps = create_method("lasso",name="Lasso ps",args=list(family = "binomial"))
-forest_ps =  create_method("forest_grf",name="Forest ps",args=list(tune.parameters = "all",honesty=FALSE))
-xgb_ps = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
-neural_net_ps = create_method("neural_net", name = "NeuralNet ps", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
-
-# Components of ensemble for the outcome
-ols_oc = create_method("ols",name="OLS oc")
-lasso_oc = create_method("lasso",name="Lasso oc",args=list(family = "binomial"))
-forest_oc =  create_method("forest_grf",name="Forest oc",args=list(tune.parameters = "all",honesty=FALSE))
-xgb_oc = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
-neural_net_oc = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
-
-
-ps_methods = list(ols_ps, forest_ps, xgb_ps, neural_net_ps)
-oc_methods = list(ols_oc, forest_oc, xgb_ps, neural_net_oc)
-
 # Simulation 1: Linear Case -----------------------------------------------
 
 # Hyperparameter Tuning for DGP 1
+## Data simulation for cross-validation of ml methods to select hyperparameters
+data_cv = DGP2(n_simulations = n_simulations,n_covariates = n_covariates, n_observations = n_observations, beta = beta, effect = effect)
+Y_cv = data_cv[[1]]
+D_cv = data_cv[[2]]
+X_cv = data_cv[[3]]
+
+## Lasso hyperparameters
+### Lasso hyperparameters are computationally less expensive to estimate
+### Nontheless, the approximate region of the best lambda minimzing the deviance is determined before the Monte Carlo simulation
+
+seq_lambda_test = seq(0, 100, 0.01)
+
+### Potential outcome
+lambda_cv_oc = cv.glmnet(X_cv, Y_cv, nfolds = 10, lambda = seq_lambda_test, alpha = 1)$lambda.1se
+
+seq_lambda_final_oc = if(lambda_cv_oc - 0.05 < 0) {seq(0, lambda_cv_oc + 0.05, 0.001)} else{seq(lambda_cv_oc - 0.05, lambda_cv_oc + 0.05, 0.001)}
+
+### Propensity Score
+lambda_cv_ps = cv.glmnet(X_cv, D_cv, nfolds = 10, lambda = seq_lambda_test, alpha = 1)$lambda.1se
+
+seq_lambda_final_ps = if(lambda_cv_ps - 0.05 < 0) {seq(0, lambda_cv_ps + 0.05, 0.001)} else{seq(lambda_cv_ps - 0.05, lambda_cv_ps + 0.05, 0.001)}
+
+## XGBoost hyperparameters
+
+## Baseline model
+### Boosting parameters
+min_child_weight = 1
+max_depth = 6
+colsample_bytree = 0.8
+subsample = 0.8
+lambda_xgb = 1
+alpha_xgb = 1
+
+### Learning paramters
+eta = 0.3
+eval_metric = "RMSE"
+seed = 123
+objective = "reg.linear"
+early_stopping_rounds = 50
+
+
+## create a random search algorithm 
+## following the idea of: https://towardsdatascience.com/getting-to-an-hyperparameter-tuned-xgboost-model-in-no-time-a9560f8eb54b
+### Create empty lists
+lowest_error_list = list()
+parameters_list = list()
+
+for (iter in 1:10000){
+  param_xgb <- list(booster = "gbtree",
+                objective = "binary:logistic",
+                max_depth = sample(3:10, 1),
+                eta = runif(1, .01, .3),
+                subsample = runif(1, .7, 1),
+                colsample_bytree = runif(1, .6, 1),
+                min_child_weight = sample(0:10, 1)
+  )
+  parameters_xgb <- as.data.frame(param_xgb)
+  parameters_list[[iter]] <- parameters_xgb
+}
 
 
 # Setup the ml methods used in the ensemble for the estimation of the nuisance parameters
 # ML methods used for propensity score estimation
-lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial"))
+lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial", lambda = seq_lambda_final))
 xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
 nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
 
 # ML methods used for potential outcome estimation
-lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial"))
-xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
-nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
+lasso_bin_oc_1 = create_method("lasso", name = "Lasso oc 1", args = list(family = "binomial"))
+xgb_oc_1 = create_method("xgboost", name = "XGBoost oc", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
+nnet_oc_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
 
 # list the respective methods for each ensemble
-ps_methods_1 = list(ols_ps, forest_ps, xgb_ps, neural_net_ps)
-oc_methods_1 = list(ols_oc, forest_oc, xgb_ps, neural_net_oc)
+ps_methods_1 = list(lasso_ps, xgb_ps, neural_net_ps)
+oc_methods_1 = list(lasso_oc, xgb_oc, neural_net_oc)
 
 # create folds for cross-fitting
 

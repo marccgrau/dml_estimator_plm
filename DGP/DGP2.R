@@ -15,7 +15,7 @@ m_func = function(X, nu = 0, gamma = 1) {
   0.5/pi*(sinh(gamma)) / (cosh(gamma) - cos(X - nu))
 }
 
-DGP1 = function(n_simulations, n_covariates, n_observations, beta, effect) {
+DGP2 = function(n_simulations, n_covariates, n_observations, beta, effect) {
   
   # construct the correlation matrix
   init_matrix = matrix( rnorm(n_covariates*n_covariates,mean=0,sd=1), n_covariates, n_covariates)
