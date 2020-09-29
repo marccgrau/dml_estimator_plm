@@ -47,7 +47,7 @@ n_simulations = 5                   # Number of simulation rounds for Monte Carl
 
 ## Data
 n_covariates = 5                    # Number of confounders
-n_observations = 2000               # Number of observations in simulated dataset
+n_observations = 20000               # Number of observations in simulated dataset
 effect = 0.5                        # True value for effect
 beta = seq(1, n_covariates, 1)/10   # Coefficients for confounders in DGP
 
@@ -62,7 +62,7 @@ k_folds = 2                         # cross-fitting folds for DML estimation
 
 # Hyperparameter Tuning for DGP 1
 ## Data simulation for cross-validation of ml methods to select hyperparameters
-data_cv = DGP2(n_simulations = n_simulations,n_covariates = n_covariates, n_observations = n_observations, beta = beta, effect = effect)
+data_cv = DGP1(n_simulations = n_simulations,n_covariates = n_covariates, n_observations = n_observations, beta = beta, effect = effect)
 Y_cv = data_cv[[1]]
 D_cv = data_cv[[2]]
 X_cv = data_cv[[3]]
@@ -84,42 +84,135 @@ lambda_cv_ps = cv.glmnet(X_cv, D_cv, nfolds = 10, lambda = seq_lambda_test, alph
 seq_lambda_final_ps = if(lambda_cv_ps - 0.05 < 0) {seq(0, lambda_cv_ps + 0.05, 0.001)} else{seq(lambda_cv_ps - 0.05, lambda_cv_ps + 0.05, 0.001)}
 
 ## XGBoost hyperparameters
+### following the idea of: https://towardsdatascience.com/getting-to-an-hyperparameter-tuned-xgboost-model-in-no-time-a9560f8eb54b
+### Propensity Score: Random Search Algorithm
+parameters_list_D = list()
 
-## Baseline model
-### Boosting parameters
-min_child_weight = 1
-max_depth = 6
-colsample_bytree = 0.8
-subsample = 0.8
-lambda_xgb = 1
-alpha_xgb = 1
-
-### Learning paramters
-eta = 0.3
-eval_metric = "RMSE"
-seed = 123
-objective = "reg.linear"
-early_stopping_rounds = 50
-
-
-## create a random search algorithm 
-## following the idea of: https://towardsdatascience.com/getting-to-an-hyperparameter-tuned-xgboost-model-in-no-time-a9560f8eb54b
-### Create empty lists
-lowest_error_list = list()
-parameters_list = list()
-
-for (iter in 1:10000){
-  param_xgb <- list(booster = "gbtree",
-                objective = "binary:logistic",
+for (i in 1:100){
+  param_D <- list(booster = "gbtree",
+                objective = "reg:squarederror",
                 max_depth = sample(3:10, 1),
                 eta = runif(1, .01, .3),
                 subsample = runif(1, .7, 1),
                 colsample_bytree = runif(1, .6, 1),
-                min_child_weight = sample(0:10, 1)
+                min_child_weight = sample(0:10, 1),
+                lambda = sample(0:5, 1)
   )
-  parameters_xgb <- as.data.frame(param_xgb)
-  parameters_list[[iter]] <- parameters_xgb
+  parameters_D <- as.data.frame(param_D)
+  parameters_list_D[[i]] <- parameters_D
 }
+
+# Create object that contains all randomly created hyperparameters
+parameters_df_D = do.call(rbind, parameters_list_D)
+
+cvfold = prep_cf_mat(nrow(X_cv), 2)[,1]
+dt_cv_D = xgb.DMatrix(data = X_cv[cvfold, ], label = D_cv[cvfold])
+dval_cv_D = xgb.DMatrix(data = X_cv[!cvfold, ], label = D_cv[!cvfold])
+lowest_error_list_D = list()
+
+# Use randomly created parameters to create 10,000 XGBoost-models
+for (row in 1:nrow(parameters_df_D)){
+  mdcv_D <- xgb.train(data=dt_cv_D,
+                    booster = "gbtree",
+                    objective = "reg:squarederror",
+                    max_depth = parameters_df_D$max_depth[row],
+                    eta = parameters_df_D$eta[row],
+                    subsample = parameters_df_D$subsample[row],
+                    colsample_bytree = parameters_df_D$colsample_bytree[row],
+                    min_child_weight = parameters_df_D$min_child_weight[row],
+                    lambda = parameters_df_D$lambda,
+                    nrounds= 300,
+                    eval_metric = "rmse",
+                    early_stopping_rounds= 30,
+                    print_every_n = 100,
+                    watchlist = list(train = dt_cv_D, val = dval_cv_D)
+  )
+  lowest_error_D <- as.data.frame(1 - min(mdcv_D$evaluation_log$train_rmse))
+  lowest_error_list_D[[row]] <- lowest_error_D
+}
+
+# Create object that contains all accuracy's
+lowest_error_df_D = do.call(rbind, lowest_error_list_D)
+
+# Bind columns of accuracy values and random hyperparameter values
+randomsearch_D = cbind(lowest_error_df_D, parameters_df_D)
+
+# Quickly display highest accuracy
+bestparams_D = randomsearch_D[which.max(randomsearch_D$`1 - min(mdcv_D$evaluation_log$train_rmse)`), ]
+
+finalparams_D = list(booster = bestparams_D$booster, 
+                     objective = bestparams_D$objective,
+                     max_depth = bestparams_D$max_depth,
+                     eta = bestparams_D$eta,
+                     subsample = bestparams_D$subsample,
+                     colsample_bytree = bestparams_D$colsample_bytree,
+                     min_child_weight = bestparams_D$min_child_weight,
+                     lambda = bestparams_D$lambda)
+
+
+## Conditional Outcome: Random Search Algorithm
+parameters_list_Y = list()
+
+for (i in 1:100){
+  param_Y <- list(booster = "gbtree",
+                  objective = "reg:squarederror",
+                  max_Yepth = sample(3:10, 1),
+                  eta = runif(1, .01, .3),
+                  subsample = runif(1, .7, 1),
+                  colsample_bytree = runif(1, .6, 1),
+                  min_child_weight = sample(0:10, 1),
+                  lambda = sample(0:5, 1)
+  )
+  parameters_Y <- as.data.frame(param_Y)
+  parameters_list_Y[[i]] <- parameters_Y
+}
+
+# Create object that contains all randomly created hyperparameters
+parameters_df_Y = do.call(rbind, parameters_list_Y)
+
+cvfold = prep_cf_mat(nrow(X_cv), 2)[,1]
+dt_cv_Y = xgb.DMatrix(data = X_cv[cvfold, ], label = D_cv[cvfold])
+dval_cv_Y = xgb.DMatrix(data = X_cv[!cvfold, ], label = D_cv[!cvfold])
+lowest_error_list_Y = list()
+
+# Use randomly created parameters to create 10,000 XGBoost-models
+for (row in 1:nrow(parameters_df_Y)){
+  mdcv_Y <- xgb.train(data=dt_cv_Y,
+                      booster = "gbtree",
+                      objective = "reg:squarederror",
+                      max_Yepth = parameters_df_Y$max_depth[row],
+                      eta = parameters_df_Y$eta[row],
+                      subsample = parameters_df_Y$subsample[row],
+                      colsample_bytree = parameters_df_Y$colsample_bytree[row],
+                      min_child_weight = parameters_df_Y$min_child_weight[row],
+                      lambda = parameters_df_Y$lambda,
+                      nrounds= 300,
+                      eval_metric = "rmse",
+                      early_stopping_rounds= 30,
+                      print_every_n = 100,
+                      watchlist = list(train = dt_cv_Y, val = dval_cv_Y)
+  )
+  lowest_error_Y <- as.data.frame(1 - min(mdcv_Y$evaluation_log$train_rmse))
+  lowest_error_list_Y[[row]] <- lowest_error_Y
+}
+
+# Create object that contains all accuracy's
+lowest_error_df_Y = do.call(rbind, lowest_error_list_Y)
+
+# Bind columns of accuracy values and random hyperparameter values
+randomsearch_Y = cbind(lowest_error_df_Y, parameters_df_Y)
+
+# Quickly display highest accuracy
+bestparams_Y = randomsearch_Y[which.max(randomsearch_Y$`1 - min(mdcv_Y$evaluation_log$train_rmse)`), ]
+
+finalparams_Y = list(booster = bestparams_Y$booster, 
+                     objective = bestparams_Y$objective,
+                     max_Yepth = bestparams_Y$max_depth,
+                     eta = bestparams_Y$eta,
+                     subsample = bestparams_Y$subsample,
+                     colsample_bytree = bestparams_Y$colsample_bytree,
+                     min_child_weight = bestparams_Y$min_child_weight,
+                     lambda = bestparams_Y$lambda)
 
 
 # Setup the ml methods used in the ensemble for the estimation of the nuisance parameters
