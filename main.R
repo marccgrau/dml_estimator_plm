@@ -14,7 +14,7 @@
 
 ## Load necessary packages, set working directory and seed, remove previously stored variables
 
-toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats", "xgboost", "neuralnet")
+toload <- c("grf", "tidyverse", "hdm", "glmnet", "nnls", "Matrix", "matrixStats", "xgboost", "neuralnet", "h2o")
 toinstall <- toload[which(toload %in% installed.packages()[,1] == F)]
 lapply(toinstall, install.packages, character.only = TRUE)
 lapply(toload, require, character.only = TRUE)
@@ -26,6 +26,9 @@ rm(list = ls())
 set.seed(123)
 
 ## Load source functions
+# General Functions
+source("general_functions/general_utils.R")
+
 # DGPs
 source("DGP/DGP1.R")
 source("DGP/DGP2.R")
@@ -67,6 +70,13 @@ Y_cv = data_cv[[1]]
 D_cv = data_cv[[2]]
 X_cv = data_cv[[3]]
 
+cvfold = prep_cf_mat(nrow(X_cv), 2)[,1]
+
+X_cv_train = X_cv[as.logical(cvfold), ]
+Y_cv_train = Y_cv[as.logical(cvfold)]
+X_cv_test = X_cv[!cvfold, ]
+Y_cv_test = Y_cv[!cvfold]
+
 ## Lasso hyperparameters
 ### Lasso hyperparameters are computationally less expensive to estimate
 ### Nontheless, the approximate region of the best lambda minimzing the deviance is determined before the Monte Carlo simulation
@@ -102,15 +112,14 @@ for (i in 1:100){
   parameters_list_D[[i]] <- parameters_D
 }
 
-# Create object that contains all randomly created hyperparameters
+### Create object that contains all randomly created hyperparameters
 parameters_df_D = do.call(rbind, parameters_list_D)
 
-cvfold = prep_cf_mat(nrow(X_cv), 2)[,1]
-dt_cv_D = xgb.DMatrix(data = X_cv[cvfold, ], label = D_cv[cvfold])
+dt_cv_D = xgb.DMatrix(data = X_cv[as.logical(cvfold), ], label = D_cv[as.logical(cvfold)])
 dval_cv_D = xgb.DMatrix(data = X_cv[!cvfold, ], label = D_cv[!cvfold])
 lowest_error_list_D = list()
 
-# Use randomly created parameters to create 10,000 XGBoost-models
+### Use randomly created parameters to create 10,000 XGBoost-models
 for (row in 1:nrow(parameters_df_D)){
   mdcv_D <- xgb.train(data=dt_cv_D,
                     booster = "gbtree",
@@ -131,13 +140,13 @@ for (row in 1:nrow(parameters_df_D)){
   lowest_error_list_D[[row]] <- lowest_error_D
 }
 
-# Create object that contains all accuracy's
+### Create object that contains all accuracy's
 lowest_error_df_D = do.call(rbind, lowest_error_list_D)
 
-# Bind columns of accuracy values and random hyperparameter values
+### Bind columns of accuracy values and random hyperparameter values
 randomsearch_D = cbind(lowest_error_df_D, parameters_df_D)
 
-# Quickly display highest accuracy
+### Quickly display highest accuracy
 bestparams_D = randomsearch_D[which.max(randomsearch_D$`1 - min(mdcv_D$evaluation_log$train_rmse)`), ]
 
 finalparams_D = list(booster = bestparams_D$booster, 
@@ -156,7 +165,7 @@ parameters_list_Y = list()
 for (i in 1:100){
   param_Y <- list(booster = "gbtree",
                   objective = "reg:squarederror",
-                  max_Yepth = sample(3:10, 1),
+                  max_depth = sample(3:10, 1),
                   eta = runif(1, .01, .3),
                   subsample = runif(1, .7, 1),
                   colsample_bytree = runif(1, .6, 1),
@@ -167,20 +176,19 @@ for (i in 1:100){
   parameters_list_Y[[i]] <- parameters_Y
 }
 
-# Create object that contains all randomly created hyperparameters
+### Create object that contains all randomly created hyperparameters
 parameters_df_Y = do.call(rbind, parameters_list_Y)
 
-cvfold = prep_cf_mat(nrow(X_cv), 2)[,1]
-dt_cv_Y = xgb.DMatrix(data = X_cv[cvfold, ], label = D_cv[cvfold])
-dval_cv_Y = xgb.DMatrix(data = X_cv[!cvfold, ], label = D_cv[!cvfold])
+dt_cv_Y = xgb.DMatrix(data = X_cv[as.logical(cvfold), ], label = Y_cv[as.logical(cvfold)])
+dval_cv_Y = xgb.DMatrix(data = X_cv[!cvfold, ], label = Y_cv[!cvfold])
 lowest_error_list_Y = list()
 
-# Use randomly created parameters to create 10,000 XGBoost-models
+### Use randomly created parameters to create 10,000 XGBoost-models
 for (row in 1:nrow(parameters_df_Y)){
   mdcv_Y <- xgb.train(data=dt_cv_Y,
                       booster = "gbtree",
                       objective = "reg:squarederror",
-                      max_Yepth = parameters_df_Y$max_depth[row],
+                      max_depth = parameters_df_Y$max_depth[row],
                       eta = parameters_df_Y$eta[row],
                       subsample = parameters_df_Y$subsample[row],
                       colsample_bytree = parameters_df_Y$colsample_bytree[row],
@@ -196,18 +204,18 @@ for (row in 1:nrow(parameters_df_Y)){
   lowest_error_list_Y[[row]] <- lowest_error_Y
 }
 
-# Create object that contains all accuracy's
+### Create object that contains all accuracy's
 lowest_error_df_Y = do.call(rbind, lowest_error_list_Y)
 
-# Bind columns of accuracy values and random hyperparameter values
+### Bind columns of accuracy values and random hyperparameter values
 randomsearch_Y = cbind(lowest_error_df_Y, parameters_df_Y)
 
-# Quickly display highest accuracy
+### Quickly display highest accuracy
 bestparams_Y = randomsearch_Y[which.max(randomsearch_Y$`1 - min(mdcv_Y$evaluation_log$train_rmse)`), ]
 
 finalparams_Y = list(booster = bestparams_Y$booster, 
                      objective = bestparams_Y$objective,
-                     max_Yepth = bestparams_Y$max_depth,
+                     max_depth = bestparams_Y$max_depth,
                      eta = bestparams_Y$eta,
                      subsample = bestparams_Y$subsample,
                      colsample_bytree = bestparams_Y$colsample_bytree,
@@ -215,16 +223,54 @@ finalparams_Y = list(booster = bestparams_Y$booster,
                      lambda = bestparams_Y$lambda)
 
 
+## Neural Network Hyperparameters
+names_nn = colnames(as.data.frame(X_cv_train))
+train_nn = as.data.frame(cbind(Y_cv_train, X_cv_train))
+test_X_nn = as.data.frame(X_cv_test)
+test_Y_nn = as.data.frame(Y_cv_test)
+
+colnames(train_nn) = c("Y", names_nn)
+nn_formula = as.formula(paste("Y ~", paste(names_nn, collapse = " + ")))
+
+params_nn = list(
+  act.fct = c("tanh", "logistic"),
+  neurons = c(5:8),
+  threshold = c(0.9, 0.95),
+  err.fct = "sse",
+  stepmax = 100000,
+  linear.output = TRUE,
+  rep = c(1:3)
+)
+
+grid_frame_nn = expand.grid(params_nn)
+
+for (row in 1:nrow(grid_frame_nn)) {
+  nncv_Y <- neuralnet(formula = nn_formula, 
+                      data=train_nn,
+                      act.fct = grid_frame_nn$act.fct[row],
+                      hidden = grid_frame_nn$neurons[row],
+                      stepmax = grid_frame_nn$stepmax[row],
+                      linear.output = grid_frame_nn$linear.output[row],
+                      err.fct = grid_frame_nn$err.fct[row],
+                      threshold = grid_frame_nn$threshold[row],
+                      rep = grid_frame_nn$rep[row]
+  )
+  pred_nn = predict(nncv_Y, newdata = test_X_nn)
+  error_Y_nn = rmse_calc(test_Y_nn, preds_nn)
+  lowest_error_list_Y_nn[[row]] = error_Y_nn
+}
+
+
 # Setup the ml methods used in the ensemble for the estimation of the nuisance parameters
 # ML methods used for propensity score estimation
 lasso_bin_ps_1 = create_method("lasso", name = "Lasso ps 1", args = list(family = "binomial", lambda = seq_lambda_final))
-xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
-nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
+xgb_ps_1 = create_method("xgboost", name = "XGBoost ps", args = bestparams_D)
+nnet_ps_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = FALSE, stepmax = 20000, threshold = 0.4))
 
 # ML methods used for potential outcome estimation
 lasso_bin_oc_1 = create_method("lasso", name = "Lasso oc 1", args = list(family = "binomial"))
-xgb_oc_1 = create_method("xgboost", name = "XGBoost oc", args = list(nrounds = 500, booster = "gbtree", verbose = FALSE))
-nnet_oc_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = TRUE, stepmax = 20000, threshold = 0.4))
+xgb_oc_1 = create_method("xgboost", name = "XGBoost oc", args = bestparams_Y)
+nnet_oc_1 = create_method("neural_net", name = "NeuralNet oc", args = list(hidden = c(5), linear.output = FALSE, stepmax = 20000, threshold = 0.4))
 
 # list the respective methods for each ensemble
 ps_methods_1 = list(lasso_ps, xgb_ps, neural_net_ps)
