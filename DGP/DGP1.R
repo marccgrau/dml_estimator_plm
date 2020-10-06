@@ -26,9 +26,11 @@ DGP1 = function(n_simulations, n_covariates, n_observations, beta, effect) {
   # construct nuisance functions
   M = X %*% beta
   G = X %*% beta^(-1)
+  # logistic function to retrieve value in probability bounds [0,1]
+  p <- 1/(1 + exp(-(M + epsilon)))
   
-  # construct treatments
-  D = M + epsilon
+  # construct treatment vector with binary treatments
+  D <- rbinom(n_observations, 1, p)
   
   # construct outcomes 
   Y = effect * D + G + eta

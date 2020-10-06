@@ -35,8 +35,11 @@ DGP2 = function(n_simulations, n_covariates, n_observations, beta, effect) {
   M = m_func(X %*% beta)
   G = g_func(X %*% beta)
   
-  # construct treatments
-  D = M + epsilon
+  # logistic function to retrieve value in probability bounds [0,1]
+  p <- 1/(1 + exp(-(M + epsilon)))
+  
+  # construct treatment vector with binary treatments
+  D <- rbinom(n_observations, 1, p)
   
   # construct outcomes 
   Y = effect * D + G + eta
